@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+
+# =====================================================================
+#   >>>>>>>>>>   PASTE YOUR BOT TOKEN HERE (between the quotes)   <<<<<<<<<<
+#   Get it from https://t.me/BotFather
+# =====================================================================
+MY_BOT_TOKEN = "8845983224:AAGzSxQc54psssQjaS8rQ_uzbB5MEJiXFaY"
+# =====================================================================
+#   Make your GitHub repo PRIVATE if the token is written here!
+# =====================================================================
+
 import os
 import sys
 import subprocess
@@ -61,7 +71,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+# Vercel env var BOT_TOKEN wins; otherwise the token pasted at the top of this file is used
+_pasted = MY_BOT_TOKEN if MY_BOT_TOKEN != "PASTE_YOUR_BOT_TOKEN_HERE" else ""
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or _pasted
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
 # Load thresholds

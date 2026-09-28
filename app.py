@@ -16,7 +16,10 @@ import html as html_lib
 import logging
 from datetime import datetime
 
-# Auto install required packages
+# Running on Vercel (serverless)?
+IS_VERCEL = bool(os.environ.get("VERCEL"))
+
+# Auto install required packages (local/VPS only; Vercel installs from requirements.txt)
 def install_requirements():
     requirements = [
         "pyTelegramBotAPI",
@@ -42,11 +45,13 @@ def install_requirements():
                 print(f"❌ Failed to install {package}: {e}")
 
 # Install requirements before importing
-install_requirements()
+if not IS_VERCEL:
+    install_requirements()
 
 # Now import the packages
 import psutil
 import telebot
+from flask import Flask, request
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # Setup logging
@@ -56,7 +61,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "8845983224:AAGzSxQc54psssQjaS8rQ_uzbB5MEJiXFaY"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
 # Load thresholds
 CPU_THRESHOLD = 90.0
@@ -66,7 +72,7 @@ MAX_FILES_PER_USER = 999
 
 # Application directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = "/tmp/data" if IS_VERCEL else os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "metadata.db")
 UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
@@ -392,7 +398,7 @@ def install_missing_imports(imports, chat_id, file_name):
     return failed_count == 0, message
 
 # Telegram bot
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(BOT_TOKEN or "0:missing", parse_mode="HTML")
 
 # Keyboards
 def main_menu_kb():
@@ -642,6 +648,11 @@ def document_handler(message):
 
 # Process management functions
 def start_file_process(file_id, chat_id):
+    if IS_VERCEL:
+        bot.send_message(chat_id, "⚠️ Running scripts is not supported on Vercel (serverless). "
+                                  "Deploy this bot on a VPS/Railway/Render to host scripts.")
+        return
+
     # Check system load
     should_stop, reason = should_stop_due_to_load()
     if should_stop:
@@ -964,7 +975,37 @@ def start_bot():
             logger.error(f"Bot polling error: {e}")
             time.sleep(5)
 
-# Main execution
+# ---------------- Vercel / Flask entrypoint ----------------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is alive", 200
+
+@app.route("/api/webhook", methods=["POST"])
+def webhook():
+    if WEBHOOK_SECRET and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+        return "forbidden", 403
+    try:
+        update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
+        bot.process_new_updates([update])
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+    return "ok", 200
+
+@app.route("/set_webhook")
+def set_webhook():
+    if WEBHOOK_SECRET and request.args.get("key") != WEBHOOK_SECRET:
+        return "forbidden", 403
+    url = f"https://{request.host}/api/webhook"
+    bot.remove_webhook()
+    ok = bot.set_webhook(url=url, secret_token=WEBHOOK_SECRET or None)
+    return f"webhook set to {url}: {ok}", 200
+
+# Main execution (local / VPS: long polling)
 if __name__ == "__main__":
+    if not BOT_TOKEN:
+        sys.exit("Set the BOT_TOKEN environment variable first.")
     logger.info("Starting 24x7 Danger Hosting Bot...")
+    bot.remove_webhook()
     start_bot()
